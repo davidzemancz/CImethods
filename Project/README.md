@@ -66,6 +66,11 @@ Pro každý MAPF problém (agenti s cíli) řešíme SAT:
   - Edge conflict: dva agenti si nemohou prohodit pozice
   - Start a cíl pro každého agenta
 
+### SAT limity
+- **Makespan limit**: max počet timestepů pro cestu (např. 2× Manhattan distance)
+- **Timeout**: max 5 sekund na jeden SAT dotaz
+- Pokud SAT neuspěje → agent čeká a zkusí znovu příští timestep
+
 ### Online replanning
 Když přijde nová objednávka za běhu simulace:
 1. **Vyber agenta** (nejbližší volný)
@@ -118,8 +123,9 @@ Pro rozložení zboží s pozicemi a distribucí objednávek:
 ### Regresní modely
 | Model | Implementace | Proč |
 |-------|--------------|------|
+| **Linear Regression** | `sklearn.linear_model.LinearRegression` | Jednoduchý baseline, interpretovatelný |
 | **Gaussian Process** | `sklearn.gaussian_process.GaussianProcessRegressor` | Uncertainty odhad, sample-efficient |
-| **Random Forest** | `sklearn.ensemble.RandomForestRegressor` | Rychlý, robustní baseline |
+| **Random Forest** | `sklearn.ensemble.RandomForestRegressor` | Rychlý, robustní |
 | **XGBoost** | `xgboost.XGBRegressor` | Velmi přesný, dobře škáluje |
 
 ### Evaluace
@@ -156,6 +162,32 @@ Pro rozložení zboží s pozicemi a distribucí objednávek:
 | Populace EA | 50 jedinců |
 | Generace EA | 100 |
 | Přetrénování surrogate | Každých 10 generací |
+
+## Baseline
+
+Pro porovnání evoluce použijeme dva baseline přístupy:
+
+| Baseline | Popis |
+|----------|-------|
+| **Random** | Náhodná permutace zboží |
+| **Greedy heuristic** | Populární zboží (dle distribuce) umístěno co nejblíže okraji |
+
+## Metriky pro porovnání
+
+### Kvalita řešení
+- **Propustnost** nejlepšího nalezeného rozložení
+
+### Efektivita surrogate
+| Metrika | Popis |
+|---------|-------|
+| **Počet simulací** | Kolik reálných MAPD simulací bylo potřeba |
+| **Wall-clock time** | Celkový čas optimalizace |
+| **Simulace k cíli** | Počet simulací potřebných k dosažení X% optima |
+
+### Porovnání
+- Evoluce **s** surrogate vs. **bez** surrogate (pure EA)
+- Při fixním počtu simulací: která metoda najde lepší řešení?
+- Při fixním čase: která metoda najde lepší řešení?
 
 ## Implementační plán
 
