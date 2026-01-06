@@ -1,0 +1,6 @@
+\babel@toc {czech}{}\relax 
+\beamer@sectionintoc {1}{Úvod a motivace}{3}{0}{1}
+\beamer@sectionintoc {2}{Feature Selection}{5}{0}{2}
+\beamer@sectionintoc {3}{Ensemble modely}{8}{0}{3}
+\beamer@sectionintoc {4}{Experimenty a výsledky}{10}{0}{4}
+\beamer@sectionintoc {5}{Závěr}{14}{0}{5}

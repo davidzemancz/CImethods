@@ -1,0 +1,528 @@
+\documentclass[aspectratio=169]{beamer}
+\usetheme{Madrid}
+\usecolortheme{default}
+
+\usepackage[utf8]{inputenc}
+\usepackage[czech]{babel}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+
+\definecolor{cvutblue}{RGB}{0,101,189}
+\setbeamercolor{structure}{fg=cvutblue}
+
+\title{Optimalizace rozložení skladu pomocí evolučních algoritmů se surrogate modely}
+\subtitle{Feature Selection a Ensemble metody}
+\author{David Zeman}
+\institute{ČVUT FEL}
+\date{2026}
+
+\begin{document}
+
+\begin{frame}
+\titlepage
+\end{frame}
+
+\begin{frame}{Obsah}
+\tableofcontents
+\end{frame}
+
+%===============================================================================
+\section{Úvod a motivace}
+%===============================================================================
+
+\begin{frame}{Problém MAPD (Multi-Agent Pickup and Delivery)}
+\begin{columns}
+\begin{column}{0.6\textwidth}
+\textbf{Problém:}
+\begin{itemize}
+    \item Sklad s~mřížkovým rozložením (9×9)
+    \item 49 pozic pro zboží, 4 agenti
+    \item Agenti sbírají objednávky a doručují k~výdejním místům
+    \item Distribuce objednávek: \textbf{Zipf} (některé položky jsou populárnější)
+\end{itemize}
+
+\vspace{0.5cm}
+\textbf{Cíl:}
+\begin{itemize}
+    \item Najít optimální \textbf{rozložení zboží} ve skladu
+    \item Maximalizovat \textbf{průchodnost} (throughput)
+    \item Populární zboží blíže k~okrajům $\Rightarrow$ rychlejší obsluha
+\end{itemize}
+\end{column}
+\begin{column}{0.4\textwidth}
+\centering
+\begin{tikzpicture}[scale=0.5]
+    % Grid
+    \draw[step=1, gray, thin] (0,0) grid (7,7);
+    % Edge (delivery points)
+    \fill[blue!20] (0,0) rectangle (7,1);
+    \fill[blue!20] (0,6) rectangle (7,7);
+    \fill[blue!20] (0,1) rectangle (1,6);
+    \fill[blue!20] (6,1) rectangle (7,6);
+    % Inner area
+    \fill[yellow!30] (1,1) rectangle (6,6);
+    % Labels
+    \node at (3.5, 0.5) {\scriptsize Výdejní místa};
+    \node at (3.5, 3.5) {\scriptsize Zboží};
+    % Popular items (red dots)
+    \fill[red] (1.5, 1.5) circle (0.2);
+    \fill[red] (5.5, 1.5) circle (0.2);
+    \fill[orange] (2.5, 2.5) circle (0.15);
+\end{tikzpicture}
+
+\vspace{0.3cm}
+\scriptsize Červená = populární zboží
+\end{column}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Výzvy optimalizace}
+\begin{block}{Problém prohledávacího prostoru}
+\begin{itemize}
+    \item Layout = permutace 49 položek $\Rightarrow$ \textbf{49! $\approx 6 \times 10^{62}$} možností
+    \item Jedna simulace trvá \textbf{2--3 sekundy}
+    \item Evoluční algoritmus potřebuje \textbf{stovky až tisíce} evaluací
+\end{itemize}
+\end{block}
+
+\vspace{0.5cm}
+\begin{block}{Řešení: Surrogate model}
+\begin{itemize}
+    \item Aproximace fitness funkcí pomocí \textbf{strojového učení}
+    \item Extrakce \textbf{40 features} z~layoutu (vzdálenosti, distribuce, kongesce, ...)
+    \item Predikce throughputu \textbf{bez simulace} $\Rightarrow$ 1000× rychlejší
+    \item Hybridní přístup: občasné reálné evaluace pro aktualizaci modelu
+\end{itemize}
+\end{block}
+\end{frame}
+
+%===============================================================================
+\section{Feature Selection}
+%===============================================================================
+
+\begin{frame}{Extrahované features (40 celkem)}
+\begin{columns}
+\begin{column}{0.5\textwidth}
+\textbf{Distance-based:}
+\begin{itemize}
+    \item Vážený průměr vzdálenosti k~okraji
+    \item Směrodatná odchylka vzdáleností
+    \item Max vzdálenost top 10\% položek
+    \item Průměr top 5/20 položek
+\end{itemize}
+
+\vspace{0.3cm}
+\textbf{Position-based:}
+\begin{itemize}
+    \item Počet populárních položek na okraji
+    \item Podíl v~rozích
+    \item Kvadrantové rozložení (NW, NE, SW, SE)
+\end{itemize}
+\end{column}
+\begin{column}{0.5\textwidth}
+\textbf{Distribution-based:}
+\begin{itemize}
+    \item Entropie vzdáleností
+    \item Gini koeficient
+    \item Pravděpodobnostní hmota na okraji
+\end{itemize}
+
+\vspace{0.3cm}
+\textbf{Congestion/clustering:}
+\begin{itemize}
+    \item Skóre kongesce
+    \item Lokální hustota populárních položek
+    \item Bottleneck skóre
+    \item Path overlap
+\end{itemize}
+\end{column}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Důležitost features (Random Forest)}
+\begin{columns}
+\begin{column}{0.55\textwidth}
+\textbf{Top 10 nejdůležitějších features:}
+\begin{enumerate}
+    \item \texttt{edge\_prob\_mass} (0.142)
+    \item \texttt{dist\_gini} (0.059)
+    \item \texttt{quad\_SE} (0.050)
+    \item \texttt{spread\_x} (0.050)
+    \item \texttt{quad\_NW} (0.044)
+    \item \texttt{hotspot} (0.041)
+    \item \texttt{dispersion} (0.040)
+    \item \texttt{skewness} (0.038)
+    \item \texttt{quadrant\_balance} (0.037)
+    \item \texttt{quad\_SW} (0.037)
+\end{enumerate}
+\end{column}
+\begin{column}{0.45\textwidth}
+\begin{block}{Klíčové zjištění}
+\texttt{edge\_prob\_mass} -- pravděpodobnostní hmota na okraji -- je \textbf{nejdůležitější prediktor} throughputu.
+
+\vspace{0.3cm}
+Populární položky blízko okraje $\Rightarrow$ vyšší throughput
+\end{block}
+\end{column}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Vliv počtu features na kvalitu modelu}
+\begin{columns}
+\begin{column}{0.5\textwidth}
+\centering
+\begin{tikzpicture}[scale=0.8]
+\begin{axis}[
+    xlabel={Počet features (K)},
+    ylabel={$R^2$ skóre},
+    legend pos=north east,
+    grid=major,
+    ymin=0, ymax=0.25,
+    width=8cm, height=6cm
+]
+\addplot[blue, mark=o, thick] coordinates {
+    (5, 0.192) (10, 0.198) (15, 0.170) (20, 0.167) (25, 0.145) (30, 0.130) (40, 0.072)
+};
+\addlegendentry{F-regression}
+
+\addplot[red, mark=square, thick] coordinates {
+    (5, 0.166) (10, 0.171) (15, 0.151) (20, 0.147) (25, 0.154) (30, 0.116) (40, 0.072)
+};
+\addlegendentry{Mutual Info}
+
+\addplot[green!60!black, mark=triangle, thick] coordinates {
+    (5, 0.187) (10, 0.145) (15, 0.133) (20, 0.120) (25, 0.114) (30, 0.093) (40, 0.072)
+};
+\addlegendentry{RF Importance}
+\end{axis}
+\end{tikzpicture}
+\end{column}
+\begin{column}{0.5\textwidth}
+\begin{block}{Výsledky}
+\begin{itemize}
+    \item Optimální počet features: \textbf{K = 10}
+    \item $R^2$ se zvyšuje z~0.072 na \textbf{0.198}
+    \item Příliš mnoho features $\Rightarrow$ overfitting
+    \item F-regression dosahuje nejlepších výsledků
+\end{itemize}
+\end{block}
+
+\vspace{0.3cm}
+\begin{alertblock}{Zlepšení}
+Redukce z~40 na 10 features: \\
+\textbf{+175\% zlepšení} $R^2$ skóre
+\end{alertblock}
+\end{column}
+\end{columns}
+\end{frame}
+
+%===============================================================================
+\section{Ensemble modely}
+%===============================================================================
+
+\begin{frame}{Ensemble metody}
+\begin{columns}
+\begin{column}{0.5\textwidth}
+\begin{block}{Voting Ensemble}
+\begin{itemize}
+    \item Kombinace 3 modelů:
+    \begin{itemize}
+        \item Ridge Regression
+        \item Random Forest
+        \item Gradient Boosting
+    \end{itemize}
+    \item Výstup = \textbf{průměr} predikcí
+    \item Robustní, rychlý
+\end{itemize}
+\end{block}
+\end{column}
+\begin{column}{0.5\textwidth}
+\begin{block}{Stacking Ensemble}
+\begin{itemize}
+    \item Stejné 3 základní modely
+    \item \textbf{Meta-learner} (Ridge) kombinuje predikce
+    \item Trénován pomocí cross-validation
+    \item Lepší predikce, složitější trénink
+\end{itemize}
+\end{block}
+\end{column}
+\end{columns}
+
+\vspace{0.5cm}
+\centering
+\begin{tikzpicture}[scale=0.7, every node/.style={font=\scriptsize}]
+    % Input
+    \node[draw, rectangle, minimum width=2cm] (input) at (0,0) {Features (10)};
+
+    % Base models
+    \node[draw, rectangle, fill=blue!20] (ridge) at (3,1) {Ridge};
+    \node[draw, rectangle, fill=green!20] (rf) at (3,0) {RF};
+    \node[draw, rectangle, fill=orange!20] (gbm) at (3,-1) {GBM};
+
+    % Meta-learner
+    \node[draw, rectangle, fill=purple!20, minimum width=1.5cm] (meta) at (6,0) {Meta-learner};
+
+    % Output
+    \node[draw, rectangle, minimum width=2cm] (output) at (9,0) {Predikce};
+
+    % Arrows
+    \draw[->] (input) -- (ridge);
+    \draw[->] (input) -- (rf);
+    \draw[->] (input) -- (gbm);
+    \draw[->] (ridge) -- (meta);
+    \draw[->] (rf) -- (meta);
+    \draw[->] (gbm) -- (meta);
+    \draw[->] (meta) -- (output);
+\end{tikzpicture}
+\end{frame}
+
+\begin{frame}{Porovnání modelů -- $R^2$ skóre}
+\centering
+\begin{tabular}{lcc}
+\toprule
+\textbf{Model} & \textbf{Features} & \textbf{$R^2$} \\
+\midrule
+\rowcolor{green!20} Voting Ensemble & 10 & $0.166 \pm 0.056$ \\
+Baseline GP & 40 & $0.152 \pm 0.040$ \\
+Ridge (selected) & 10 & $0.145 \pm 0.048$ \\
+Baseline RF & 40 & $0.145 \pm 0.038$ \\
+RF (selected) & 10 & $0.136 \pm 0.055$ \\
+Stacking Ensemble & 10 & $0.123 \pm 0.019$ \\
+GBM (selected) & 10 & $0.084 \pm 0.099$ \\
+Baseline Ridge & 40 & $0.072 \pm 0.075$ \\
+Baseline Linear & 40 & $0.027 \pm 0.105$ \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.5cm}
+\begin{block}{Poznámka}
+Voting Ensemble s~10 features překonává všechny baseline modely se 40 features!
+\end{block}
+\end{frame}
+
+%===============================================================================
+\section{Experimenty a výsledky}
+%===============================================================================
+
+\begin{frame}{Nastavení experimentů}
+\begin{columns}
+\begin{column}{0.5\textwidth}
+\textbf{Parametry skladu:}
+\begin{itemize}
+    \item Velikost: $9 \times 9$
+    \item Počet zboží: 49
+    \item Počet agentů: 4
+    \item Planner: A*
+    \item Distribuce: Zipf 1.2
+\end{itemize}
+\end{column}
+\begin{column}{0.5\textwidth}
+\textbf{Parametry EA:}
+\begin{itemize}
+    \item Velikost populace: 20
+    \item Počet generací: 50
+    \item Reálná evaluace: každých 5 generací
+    \item Počáteční vzorky: 300
+    \item Simulační kroky: 300
+\end{itemize}
+\end{column}
+\end{columns}
+
+\vspace{0.5cm}
+\begin{block}{Hybridní přístup}
+\begin{enumerate}
+    \item Sběr 300 vzorků pro trénink surrogate modelu
+    \item Evoluční algoritmus používá surrogate pro rychlé evaluace
+    \item Každých 5 generací: reálná evaluace pro aktualizaci modelu
+\end{enumerate}
+\end{block}
+\end{frame}
+
+\begin{frame}{Výsledky -- Porovnání metod}
+\centering
+\begin{tabular}{lccc}
+\toprule
+\textbf{Metoda} & \textbf{Fitness} & \textbf{Real evals} & \textbf{Čas} \\
+\midrule
+Random (best) & 0.4800 & -- & -- \\
+Random (mean) & 0.3399 & -- & -- \\
+Greedy & 0.4400 & -- & -- \\
+\midrule
+EA bez surrogate & 0.5500 & 1020 & 2608s \\
+\rowcolor{yellow!30} EA + Voting Ensemble & 0.5600 & 168 & 451s \\
+\rowcolor{green!30} EA + Stacking Ensemble & \textbf{0.5800} & 168 & 630s \\
+\bottomrule
+\end{tabular}
+
+\vspace{0.5cm}
+\begin{columns}
+\begin{column}{0.5\textwidth}
+\begin{block}{Speedup}
+\begin{itemize}
+    \item Voting: \textbf{5.79×} rychlejší
+    \item Stacking: \textbf{4.14×} rychlejší
+\end{itemize}
+\end{block}
+\end{column}
+\begin{column}{0.5\textwidth}
+\begin{block}{Nejlepší metoda}
+\textbf{Stacking Ensemble}
+\begin{itemize}
+    \item Fitness: 0.5800 (+5.5\%)
+    \item 83.5\% redukce evaluací
+\end{itemize}
+\end{block}
+\end{column}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Konvergence EA}
+\centering
+\begin{tikzpicture}[scale=0.9]
+\begin{axis}[
+    xlabel={Generace},
+    ylabel={Best Fitness},
+    legend pos=south east,
+    grid=major,
+    width=12cm, height=6.5cm,
+    ymin=0.3, ymax=0.6
+]
+% EA bez surrogate
+\addplot[blue, thick] coordinates {
+    (0, 0.43) (10, 0.533) (20, 0.533) (30, 0.533) (40, 0.55) (50, 0.55)
+};
+\addlegendentry{Bez surrogate}
+
+% Voting
+\addplot[red, thick] coordinates {
+    (0, 0.477) (10, 0.477) (20, 0.56) (30, 0.56) (40, 0.56) (50, 0.56)
+};
+\addlegendentry{Voting Ensemble}
+
+% Stacking
+\addplot[green!60!black, thick] coordinates {
+    (0, 0.49) (10, 0.49) (20, 0.497) (30, 0.58) (40, 0.58) (50, 0.58)
+};
+\addlegendentry{Stacking Ensemble}
+
+% Baselines
+\addplot[orange, dashed] coordinates {(0, 0.44) (50, 0.44)};
+\addlegendentry{Greedy}
+
+\addplot[gray, dashed] coordinates {(0, 0.48) (50, 0.48)};
+\addlegendentry{Random best}
+\end{axis}
+\end{tikzpicture}
+\end{frame}
+
+\begin{frame}{Fitness vs. výpočetní čas}
+\centering
+\begin{tikzpicture}[scale=0.9]
+\begin{axis}[
+    xlabel={Čas (s)},
+    ylabel={Best Fitness},
+    legend pos=south east,
+    grid=major,
+    width=12cm, height=6.5cm,
+    ymin=0.3, ymax=0.6,
+    xmax=2800
+]
+% EA bez surrogate
+\addplot[blue, thick] coordinates {
+    (0, 0.43) (520, 0.533) (1040, 0.533) (1560, 0.533) (2080, 0.55) (2608, 0.55)
+};
+\addlegendentry{Bez surrogate}
+
+% Voting (rychlejší)
+\addplot[red, thick] coordinates {
+    (0, 0.477) (90, 0.477) (180, 0.56) (270, 0.56) (360, 0.56) (451, 0.56)
+};
+\addlegendentry{Voting Ensemble}
+
+% Stacking
+\addplot[green!60!black, thick] coordinates {
+    (0, 0.49) (126, 0.49) (252, 0.497) (378, 0.58) (504, 0.58) (630, 0.58)
+};
+\addlegendentry{Stacking Ensemble}
+\end{axis}
+\end{tikzpicture}
+
+\vspace{0.3cm}
+\textbf{Klíčový závěr:} Surrogate metody dosahují lepších výsledků za zlomek času!
+\end{frame}
+
+%===============================================================================
+\section{Závěr}
+%===============================================================================
+
+\begin{frame}{Shrnutí výsledků}
+\begin{columns}
+\begin{column}{0.5\textwidth}
+\begin{block}{Feature Selection}
+\begin{itemize}
+    \item Redukce 40 $\rightarrow$ 10 features
+    \item Zlepšení $R^2$: +175\%
+    \item Klíčová feature: \texttt{edge\_prob\_mass}
+\end{itemize}
+\end{block}
+
+\begin{block}{Ensemble modely}
+\begin{itemize}
+    \item Voting: rychlý, robustní
+    \item Stacking: nejlepší predikce
+    \item Překonávají single modely
+\end{itemize}
+\end{block}
+\end{column}
+\begin{column}{0.5\textwidth}
+\begin{block}{EA s~surrogate}
+\begin{itemize}
+    \item Fitness: +5.5\% vs bez surrogate
+    \item Speedup: 4--6× rychlejší
+    \item 83.5\% méně reálných evaluací
+\end{itemize}
+\end{block}
+
+\begin{alertblock}{Hlavní přínos}
+Kombinace \textbf{feature selection} a \textbf{ensemble surrogate} umožňuje efektivní optimalizaci rozložení skladu s~výraznou úsporou výpočetního času.
+\end{alertblock}
+\end{column}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Možná rozšíření}
+\begin{itemize}
+    \item \textbf{Adaptivní feature selection} -- dynamický výběr features během evoluce
+    \item \textbf{Transfer learning} -- přenos znalostí mezi různými velikostmi skladů
+    \item \textbf{Multi-objective optimalizace} -- throughput vs. kolize vs. energetická náročnost
+    \item \textbf{Online learning} -- průběžná adaptace surrogate modelu
+    \item \textbf{Větší sklady} -- škálovatelnost na reálné warehouse rozměry
+\end{itemize}
+
+\vspace{0.5cm}
+\begin{block}{Praktické aplikace}
+\begin{itemize}
+    \item E-commerce fulfillment centra (Amazon, Alza, ...)
+    \item Automatizované sklady s~AGV roboty
+    \item Optimalizace logistických operací
+\end{itemize}
+\end{block}
+\end{frame}
+
+\begin{frame}
+\centering
+\Huge Děkuji za pozornost!
+
+\vspace{1cm}
+\Large Otázky?
+
+\vspace{1cm}
+\normalsize
+\texttt{david.zeman@fel.cvut.cz}
+\end{frame}
+
+\end{document}

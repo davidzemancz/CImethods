@@ -851,6 +851,24 @@ class SurrogateModel:
         # Scale features
         X_scaled = self.scaler.fit_transform(X)
 
+        # For stacking model, recreate with appropriate CV folds based on sample size
+        if self.model_type == "stacking":
+            n_samples = len(X_scaled)
+            # Need at least 2 samples per fold, minimum 2 folds
+            cv_folds = min(5, max(2, n_samples // 2))
+            if n_samples < 4:
+                # Not enough samples for stacking CV, skip fitting
+                return
+            self.model = StackingRegressor(
+                estimators=[
+                    ('ridge', Ridge(alpha=10.0)),
+                    ('rf', RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42)),
+                    ('gbm', GradientBoostingRegressor(n_estimators=100, max_depth=5, random_state=42)),
+                ],
+                final_estimator=Ridge(alpha=1.0),
+                cv=cv_folds
+            )
+
         # Fit model
         self.model.fit(X_scaled, y)
         self.is_fitted = True
