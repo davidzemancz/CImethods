@@ -84,6 +84,7 @@ class HybridFitnessEvaluator:
         self.generation = 0
         self.real_evals = 0
         self.surrogate_evals = 0
+        self.real_eval_generations = []  # Track which generations used real evaluation
 
     def _run_real_simulation(self, layout: List[int], seed: int = None) -> float:
         """Run actual MAPD simulation."""
@@ -123,6 +124,9 @@ class HybridFitnessEvaluator:
         use_real = (self.generation % self.real_eval_interval == 0)
 
         if use_real or not self.surrogate.is_fitted:
+            # Track generations with real evaluation
+            if self.generation not in self.real_eval_generations:
+                self.real_eval_generations.append(self.generation)
             # Real evaluation
             fitness = self._run_real_simulation(individual, seed=self.generation * 1000 + self.real_evals)
 
@@ -230,8 +234,8 @@ def run_evolution(warehouse: Warehouse,
     stats.register("min", np.min)
     stats.register("max", np.max)
 
-    # Hall of Fame (best individuals)
-    hof = tools.HallOfFame(1)
+    # Hall of Fame (best individuals) - keep top 5
+    hof = tools.HallOfFame(5)
 
     # Create initial population
     pop = toolbox.population(n=pop_size)
@@ -239,6 +243,7 @@ def run_evolution(warehouse: Warehouse,
     # History tracking
     fitness_history = []
     avg_fitness_history = []
+    best_individual_history = []  # Track best individual per generation
 
     # Evaluate initial population
     fitnesses = list(map(toolbox.evaluate, pop))
@@ -248,11 +253,13 @@ def run_evolution(warehouse: Warehouse,
     # Update statistics
     record = stats.compile(pop)
     hof.update(pop)
-    fitness_history.append(record['max'])
+    # Use Hall of Fame for best-so-far (monotonically increasing)
+    fitness_history.append(hof[0].fitness.values[0])
     avg_fitness_history.append(record['avg'])
+    best_individual_history.append((list(hof[0]), hof[0].fitness.values[0]))
 
     if verbose:
-        print(f"Gen 0: best={record['max']:.4f}, avg={record['avg']:.4f}, std={record['std']:.4f}")
+        print(f"Gen 0: best={hof[0].fitness.values[0]:.4f}, avg={record['avg']:.4f}, std={record['std']:.4f}")
 
     if callback:
         callback(0, record['max'], record)
@@ -291,14 +298,16 @@ def run_evolution(warehouse: Warehouse,
         # Update statistics
         record = stats.compile(pop)
         hof.update(pop)
-        fitness_history.append(record['max'])
+        # Use Hall of Fame for best-so-far (monotonically increasing)
+        fitness_history.append(hof[0].fitness.values[0])
         avg_fitness_history.append(record['avg'])
+        best_individual_history.append((list(hof[0]), hof[0].fitness.values[0]))
 
         if verbose and (gen % 10 == 0 or gen == n_generations):
             real_info = ""
             if evaluator:
                 real_info = f", real_evals={evaluator.real_evals}"
-            print(f"Gen {gen}: best={record['max']:.4f}, avg={record['avg']:.4f}{real_info}")
+            print(f"Gen {gen}: best={hof[0].fitness.values[0]:.4f}, avg={record['avg']:.4f}{real_info}")
 
         if callback:
             callback(gen, record['max'], record)
@@ -311,15 +320,19 @@ def run_evolution(warehouse: Warehouse,
         'best_fitness': hof[0].fitness.values[0],
         'fitness_history': fitness_history,
         'avg_fitness_history': avg_fitness_history,
+        'best_individual_history': best_individual_history,  # History of best per generation
+        'hall_of_fame': [(list(ind), ind.fitness.values[0]) for ind in hof],  # Top 5 individuals
         'wall_time': wall_time
     }
 
     if evaluator:
         results['real_evals'] = evaluator.real_evals
         results['surrogate_evals'] = evaluator.surrogate_evals
+        results['real_eval_generations'] = evaluator.real_eval_generations
     else:
         results['real_evals'] = n_generations * pop_size + pop_size
         results['surrogate_evals'] = 0
+        results['real_eval_generations'] = list(range(n_generations + 1))  # All generations
 
     return results
 
