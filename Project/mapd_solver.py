@@ -1,9 +1,10 @@
 """
-MAPD (Multi-Agent Pickup and Delivery) solver using SAT-based path planning.
+MAPD (Multi-Agent Pickup and Delivery) solver using SAT-based or A* path planning.
 """
 
 from typing import List, Tuple, Dict, Optional, Set
 from enum import Enum
+import heapq
 import numpy as np
 from pysat.solvers import Solver
 from pysat.formula import CNF
@@ -287,12 +288,145 @@ class SATPathPlanner:
         return path
 
 
+class AStarPathPlanner:
+    """
+    A* path planner with space-time reservations for collision avoidance.
+    Much faster than SAT for simple cases.
+    """
+
+    def __init__(self, warehouse: Warehouse):
+        """
+        Initialize planner.
+
+        Args:
+            warehouse: Warehouse instance
+        """
+        self.warehouse = warehouse
+
+    def plan_path(self,
+                  start: Tuple[int, int],
+                  goal: Tuple[int, int],
+                  frozen_paths: Dict[int, List[Tuple[int, int]]],
+                  makespan_limit: int = None) -> Optional[List[Tuple[int, int]]]:
+        """
+        Plan collision-free path from start to goal using space-time A*.
+
+        Args:
+            start: Starting position
+            goal: Goal position
+            frozen_paths: Dictionary mapping agent_id -> list of positions over time
+            makespan_limit: Maximum path length (None = auto-calculate)
+
+        Returns:
+            List of positions forming the path, or None if no solution found
+        """
+        if start == goal:
+            return [start]
+
+        # Calculate makespan limit
+        min_dist = self.warehouse.manhattan_distance(start, goal)
+        if makespan_limit is None:
+            makespan_limit = min_dist * 3 + 10
+
+        # Build reservation table from frozen paths
+        # reservations[t] = set of occupied positions at time t
+        reservations: Dict[int, Set[Tuple[int, int]]] = {}
+        for agent_id, path in frozen_paths.items():
+            for t, pos in enumerate(path):
+                if t not in reservations:
+                    reservations[t] = set()
+                reservations[t].add(pos)
+            # After path ends, agent stays at last position
+            if path:
+                last_pos = path[-1]
+                for t in range(len(path), makespan_limit + 1):
+                    if t not in reservations:
+                        reservations[t] = set()
+                    reservations[t].add(last_pos)
+
+        # A* search in space-time
+        # State: (x, y, t)
+        # Priority queue: (f_score, counter, state)
+        counter = 0
+        start_state = (start[0], start[1], 0)
+
+        # f = g + h, where g = time, h = manhattan distance to goal
+        h_start = self.warehouse.manhattan_distance(start, goal)
+        open_set = [(h_start, counter, start_state)]
+
+        # g_score[state] = cost to reach state
+        g_score = {start_state: 0}
+
+        # came_from[state] = previous state
+        came_from = {}
+
+        while open_set:
+            _, _, current = heapq.heappop(open_set)
+            x, y, t = current
+            current_pos = (x, y)
+
+            # Check if reached goal
+            if current_pos == goal:
+                return self._reconstruct_path(came_from, current)
+
+            # Check makespan limit
+            if t >= makespan_limit:
+                continue
+
+            # Generate neighbors (move or wait)
+            neighbors = self.warehouse.get_neighbors(current_pos)
+            neighbors.append(current_pos)  # Wait action
+
+            for next_pos in neighbors:
+                next_t = t + 1
+                next_state = (next_pos[0], next_pos[1], next_t)
+
+                # Check vertex conflict (next position occupied at next time)
+                if next_t in reservations and next_pos in reservations[next_t]:
+                    continue
+
+                # Check edge conflict (swap)
+                if t in reservations and next_pos in reservations.get(t, set()):
+                    # Check if the agent at next_pos is moving to current_pos
+                    swap_conflict = False
+                    for agent_id, path in frozen_paths.items():
+                        if t < len(path) and t + 1 < len(path):
+                            if path[t] == next_pos and path[t + 1] == current_pos:
+                                swap_conflict = True
+                                break
+                    if swap_conflict:
+                        continue
+
+                # Calculate tentative g score
+                tentative_g = g_score[current] + 1
+
+                if next_state not in g_score or tentative_g < g_score[next_state]:
+                    g_score[next_state] = tentative_g
+                    came_from[next_state] = current
+                    h = self.warehouse.manhattan_distance(next_pos, goal)
+                    f = tentative_g + h
+                    counter += 1
+                    heapq.heappush(open_set, (f, counter, next_state))
+
+        return None  # No path found
+
+    def _reconstruct_path(self, came_from: Dict, current: Tuple[int, int, int]) -> List[Tuple[int, int]]:
+        """Reconstruct path from came_from map."""
+        path = [(current[0], current[1])]
+        while current in came_from:
+            current = came_from[current]
+            path.append((current[0], current[1]))
+        path.reverse()
+        return path
+
+
 class MAPDSimulator:
     """
     Multi-Agent Pickup and Delivery simulator.
     """
 
-    def __init__(self, warehouse: Warehouse, n_agents: int, order_generator: OrderGenerator, seed: int = None):
+    def __init__(self, warehouse: Warehouse, n_agents: int, order_generator: OrderGenerator,
+                 seed: int = None, planner_type: str = "sat"):
         """
         Initialize simulator.
 
@@ -301,11 +435,18 @@ class MAPDSimulator:
             n_agents: Number of agents
             order_generator: Order generator instance
             seed: Random seed
+            planner_type: "sat" for SAT-based planner, "astar" for A* planner
         """
         self.warehouse = warehouse
         self.order_generator = order_generator
         self.rng = np.random.default_rng(seed)
-        self.planner = SATPathPlanner(warehouse)
+
+        # Select planner
+        if planner_type == "astar":
+            self.planner = AStarPathPlanner(warehouse)
+        else:
+            self.planner = SATPathPlanner(warehouse)
+        self.planner_type = planner_type
 
         # Initialize agents on delivery points
         self.agents = self._init_agents(n_agents)

@@ -16,7 +16,8 @@ def random_baseline(warehouse: Warehouse,
                     sim_steps: int = 500,
                     order_lambda: float = 0.5,
                     seed: int = None,
-                    verbose: bool = True) -> Dict:
+                    verbose: bool = True,
+                    planner_type: str = "sat") -> Dict:
     """
     Random baseline - evaluate random layouts.
 
@@ -29,6 +30,7 @@ def random_baseline(warehouse: Warehouse,
         order_lambda: Order rate
         seed: Random seed
         verbose: Print progress
+        planner_type: "sat" or "astar"
 
     Returns:
         Dictionary with:
@@ -53,7 +55,7 @@ def random_baseline(warehouse: Warehouse,
         warehouse.set_layout(layout)
 
         # Run simulation
-        sim = MAPDSimulator(warehouse, n_agents, order_generator, seed=i)
+        sim = MAPDSimulator(warehouse, n_agents, order_generator, seed=i, planner_type=planner_type)
         throughput = sim.run(n_steps=sim_steps, order_lambda=order_lambda)
 
         all_fitness.append(throughput)
@@ -80,7 +82,8 @@ def greedy_baseline(warehouse: Warehouse,
                     n_agents: int,
                     sim_steps: int = 500,
                     order_lambda: float = 0.5,
-                    seed: int = None) -> Dict:
+                    seed: int = None,
+                    planner_type: str = "sat") -> Dict:
     """
     Greedy baseline - place popular goods closest to edges.
 
@@ -94,6 +97,7 @@ def greedy_baseline(warehouse: Warehouse,
         sim_steps: Simulation steps
         order_lambda: Order rate
         seed: Random seed
+        planner_type: "sat" or "astar"
 
     Returns:
         Dictionary with:
@@ -126,7 +130,7 @@ def greedy_baseline(warehouse: Warehouse,
 
     # Evaluate
     warehouse.set_layout(layout)
-    sim = MAPDSimulator(warehouse, n_agents, order_generator, seed=seed)
+    sim = MAPDSimulator(warehouse, n_agents, order_generator, seed=seed, planner_type=planner_type)
     throughput = sim.run(n_steps=sim_steps, order_lambda=order_lambda)
 
     return {
@@ -140,7 +144,8 @@ def inverse_greedy_baseline(warehouse: Warehouse,
                             n_agents: int,
                             sim_steps: int = 500,
                             order_lambda: float = 0.5,
-                            seed: int = None) -> Dict:
+                            seed: int = None,
+                            planner_type: str = "sat") -> Dict:
     """
     Inverse greedy baseline - place popular goods FURTHEST from edges.
 
@@ -153,6 +158,7 @@ def inverse_greedy_baseline(warehouse: Warehouse,
         sim_steps: Simulation steps
         order_lambda: Order rate
         seed: Random seed
+        planner_type: "sat" or "astar"
 
     Returns:
         Dictionary with:
@@ -183,7 +189,7 @@ def inverse_greedy_baseline(warehouse: Warehouse,
 
     # Evaluate
     warehouse.set_layout(layout)
-    sim = MAPDSimulator(warehouse, n_agents, order_generator, seed=seed)
+    sim = MAPDSimulator(warehouse, n_agents, order_generator, seed=seed, planner_type=planner_type)
     throughput = sim.run(n_steps=sim_steps, order_lambda=order_lambda)
 
     return {
@@ -199,9 +205,13 @@ def run_all_baselines(warehouse: Warehouse,
                       sim_steps: int = 500,
                       order_lambda: float = 0.5,
                       seed: int = None,
-                      verbose: bool = True) -> Dict[str, Dict]:
+                      verbose: bool = True,
+                      planner_type: str = "sat") -> Dict[str, Dict]:
     """
     Run all baseline methods.
+
+    Args:
+        planner_type: "sat" or "astar"
 
     Returns:
         Dictionary with results for each baseline
@@ -209,7 +219,7 @@ def run_all_baselines(warehouse: Warehouse,
     results = {}
 
     if verbose:
-        print("Running baselines...")
+        print(f"Running baselines (planner: {planner_type})...")
 
     # Random
     if verbose:
@@ -220,7 +230,8 @@ def run_all_baselines(warehouse: Warehouse,
         sim_steps=sim_steps,
         order_lambda=order_lambda,
         seed=seed,
-        verbose=verbose
+        verbose=verbose,
+        planner_type=planner_type
     )
 
     # Greedy
@@ -230,7 +241,8 @@ def run_all_baselines(warehouse: Warehouse,
         warehouse, order_generator, n_agents,
         sim_steps=sim_steps,
         order_lambda=order_lambda,
-        seed=seed
+        seed=seed,
+        planner_type=planner_type
     )
     if verbose:
         print(f"  Greedy fitness: {results['greedy']['fitness']:.4f}")
@@ -242,7 +254,8 @@ def run_all_baselines(warehouse: Warehouse,
         warehouse, order_generator, n_agents,
         sim_steps=sim_steps,
         order_lambda=order_lambda,
-        seed=seed
+        seed=seed,
+        planner_type=planner_type
     )
     if verbose:
         print(f"  Inverse greedy fitness: {results['inverse_greedy']['fitness']:.4f}")

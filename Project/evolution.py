@@ -57,7 +57,8 @@ class HybridFitnessEvaluator:
                  surrogate: SurrogateModel,
                  real_eval_interval: int = 10,
                  sim_steps: int = 500,
-                 order_lambda: float = 0.5):
+                 order_lambda: float = 0.5,
+                 planner_type: str = "sat"):
         """
         Initialize hybrid evaluator.
 
@@ -69,6 +70,7 @@ class HybridFitnessEvaluator:
             real_eval_interval: Run real simulation every N generations
             sim_steps: Number of steps for MAPD simulation
             order_lambda: Poisson lambda for order generation
+            planner_type: "sat" or "astar"
         """
         self.warehouse = warehouse
         self.order_generator = order_generator
@@ -77,6 +79,7 @@ class HybridFitnessEvaluator:
         self.real_eval_interval = real_eval_interval
         self.sim_steps = sim_steps
         self.order_lambda = order_lambda
+        self.planner_type = planner_type
 
         self.generation = 0
         self.real_evals = 0
@@ -89,7 +92,8 @@ class HybridFitnessEvaluator:
             self.warehouse,
             n_agents=self.n_agents,
             order_generator=self.order_generator,
-            seed=seed
+            seed=seed,
+            planner_type=self.planner_type
         )
         throughput = sim.run(n_steps=self.sim_steps, order_lambda=self.order_lambda)
         self.real_evals += 1
@@ -155,7 +159,8 @@ def run_evolution(warehouse: Warehouse,
                   mutpb: float = 0.2,
                   seed: int = None,
                   verbose: bool = True,
-                  callback: Callable = None) -> Dict:
+                  callback: Callable = None,
+                  planner_type: str = "sat") -> Dict:
     """
     Run evolutionary optimization.
 
@@ -175,6 +180,7 @@ def run_evolution(warehouse: Warehouse,
         seed: Random seed
         verbose: Print progress
         callback: Optional callback(generation, best_fitness, stats)
+        planner_type: "sat" or "astar"
 
     Returns:
         Dictionary with results:
@@ -202,14 +208,16 @@ def run_evolution(warehouse: Warehouse,
             warehouse, order_generator, n_agents, surrogate,
             real_eval_interval=real_eval_interval,
             sim_steps=sim_steps,
-            order_lambda=order_lambda
+            order_lambda=order_lambda,
+            planner_type=planner_type
         )
         toolbox.register("evaluate", evaluator.evaluate)
     else:
         # Pure EA - always use real simulation
         def real_evaluate(individual):
             warehouse.set_layout(individual)
-            sim = MAPDSimulator(warehouse, n_agents, order_generator, seed=random.randint(0, 100000))
+            sim = MAPDSimulator(warehouse, n_agents, order_generator,
+                               seed=random.randint(0, 100000), planner_type=planner_type)
             return (sim.run(n_steps=sim_steps, order_lambda=order_lambda),)
 
         toolbox.register("evaluate", real_evaluate)
@@ -323,7 +331,8 @@ def collect_initial_data(warehouse: Warehouse,
                          sim_steps: int = 200,
                          order_lambda: float = 0.5,
                          seed: int = None,
-                         verbose: bool = True) -> Tuple[List[np.ndarray], List[float], List[List[int]]]:
+                         verbose: bool = True,
+                         planner_type: str = "sat") -> Tuple[List[np.ndarray], List[float], List[List[int]]]:
     """
     Collect initial training data for surrogate model.
 
@@ -336,6 +345,7 @@ def collect_initial_data(warehouse: Warehouse,
         order_lambda: Order rate
         seed: Random seed
         verbose: Print progress
+        planner_type: "sat" or "astar"
 
     Returns:
         (features_list, fitness_list, layouts_list)
@@ -358,7 +368,7 @@ def collect_initial_data(warehouse: Warehouse,
         features_list.append(features)
 
         # Run simulation
-        sim = MAPDSimulator(warehouse, n_agents, order_generator, seed=i)
+        sim = MAPDSimulator(warehouse, n_agents, order_generator, seed=i, planner_type=planner_type)
         throughput = sim.run(n_steps=sim_steps, order_lambda=order_lambda)
         fitness_list.append(throughput)
 
