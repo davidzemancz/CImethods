@@ -7,7 +7,7 @@ import numpy as np
 from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, ConstantKernel, WhiteKernel
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor, StackingRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import cross_val_score
 
@@ -761,24 +761,27 @@ class SurrogateModel:
     """
     Surrogate model for predicting MAPD throughput.
 
-    Supports multiple model types: linear, ridge, gp, rf, xgboost.
+    Supports multiple model types: linear, ridge, gp, rf, xgboost, voting, stacking.
     """
 
-    AVAILABLE_MODELS = ['linear', 'ridge', 'gp', 'rf']
+    AVAILABLE_MODELS = ['linear', 'ridge', 'gp', 'rf', 'voting', 'stacking']
     if HAS_XGBOOST:
         AVAILABLE_MODELS.append('xgboost')
 
-    def __init__(self, model_type: str = "ridge"):
+    def __init__(self, model_type: str = "ridge", feature_indices: Optional[List[int]] = None):
         """
         Initialize surrogate model.
 
         Args:
-            model_type: 'linear', 'ridge', 'gp', 'rf', or 'xgboost'
+            model_type: 'linear', 'ridge', 'gp', 'rf', 'voting', 'stacking', or 'xgboost'
+            feature_indices: Optional list of feature indices to use (for feature selection).
+                           If None, all features are used.
         """
         if model_type not in self.AVAILABLE_MODELS:
             raise ValueError(f"Unknown model type: {model_type}. Available: {self.AVAILABLE_MODELS}")
 
         self.model_type = model_type
+        self.feature_indices = feature_indices
         self.model = self._create_model()
         self.scaler = StandardScaler()
         self.X_train: List[np.ndarray] = []
@@ -798,6 +801,30 @@ class SurrogateModel:
             return RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42)
         elif self.model_type == "xgboost":
             return XGBRegressor(n_estimators=100, max_depth=5, learning_rate=0.1, random_state=42)
+        elif self.model_type == "voting":
+            return VotingRegressor([
+                ('ridge', Ridge(alpha=10.0)),
+                ('rf', RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42)),
+                ('gbm', GradientBoostingRegressor(n_estimators=100, max_depth=5, random_state=42)),
+            ])
+        elif self.model_type == "stacking":
+            return StackingRegressor(
+                estimators=[
+                    ('ridge', Ridge(alpha=10.0)),
+                    ('rf', RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42)),
+                    ('gbm', GradientBoostingRegressor(n_estimators=100, max_depth=5, random_state=42)),
+                ],
+                final_estimator=Ridge(alpha=1.0),
+                cv=5
+            )
+
+    def _select_features(self, X: np.ndarray) -> np.ndarray:
+        """Apply feature selection if feature_indices is set."""
+        if self.feature_indices is None:
+            return X
+        if X.ndim == 1:
+            return X[self.feature_indices]
+        return X[:, self.feature_indices]
 
     def add_sample(self, features: np.ndarray, fitness: float):
         """
@@ -807,7 +834,7 @@ class SurrogateModel:
             features: Feature vector from extract_features()
             fitness: Actual throughput from simulation
         """
-        self.X_train.append(features)
+        self.X_train.append(features)  # Store full features
         self.y_train.append(fitness)
 
     def fit(self):
@@ -817,6 +844,9 @@ class SurrogateModel:
 
         X = np.array(self.X_train)
         y = np.array(self.y_train)
+
+        # Apply feature selection
+        X = self._select_features(X)
 
         # Scale features
         X_scaled = self.scaler.fit_transform(X)
@@ -850,6 +880,8 @@ class SurrogateModel:
             # Return dummy value if not fitted
             return 0.0
 
+        # Apply feature selection
+        features = self._select_features(features)
         X = features.reshape(1, -1)
         X_scaled = self.scaler.transform(X)
         return float(self.model.predict(X_scaled)[0])
@@ -867,6 +899,8 @@ class SurrogateModel:
         if not self.is_fitted:
             return np.zeros(len(features_batch))
 
+        # Apply feature selection
+        features_batch = self._select_features(features_batch)
         X_scaled = self.scaler.transform(features_batch)
         return self.model.predict(X_scaled)
 
@@ -883,6 +917,8 @@ class SurrogateModel:
         if self.model_type != "gp" or not self.is_fitted:
             return 0.0
 
+        # Apply feature selection
+        features = self._select_features(features)
         X = features.reshape(1, -1)
         X_scaled = self.scaler.transform(X)
         _, std = self.model.predict(X_scaled, return_std=True)

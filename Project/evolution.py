@@ -156,6 +156,7 @@ def run_evolution(warehouse: Warehouse,
                   pop_size: int = 50,
                   use_surrogate: bool = True,
                   surrogate_type: str = "gp",
+                  feature_indices: Optional[List[int]] = None,
                   real_eval_interval: int = 10,
                   sim_steps: int = 500,
                   order_lambda: float = 0.5,
@@ -175,7 +176,8 @@ def run_evolution(warehouse: Warehouse,
         n_generations: Number of generations
         pop_size: Population size
         use_surrogate: Whether to use surrogate model
-        surrogate_type: Type of surrogate ('linear', 'gp', 'rf', 'xgboost')
+        surrogate_type: Type of surrogate ('linear', 'gp', 'rf', 'voting', 'stacking', 'xgboost')
+        feature_indices: Optional list of feature indices for feature selection (None = all)
         real_eval_interval: Run real simulation every N generations (if using surrogate)
         sim_steps: Number of steps for MAPD simulation
         order_lambda: Poisson lambda for order generation
@@ -207,7 +209,7 @@ def run_evolution(warehouse: Warehouse,
 
     # Setup evaluator
     if use_surrogate:
-        surrogate = SurrogateModel(surrogate_type)
+        surrogate = SurrogateModel(surrogate_type, feature_indices=feature_indices)
         evaluator = HybridFitnessEvaluator(
             warehouse, order_generator, n_agents, surrogate,
             real_eval_interval=real_eval_interval,
